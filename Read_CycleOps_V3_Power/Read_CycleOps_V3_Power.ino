@@ -127,7 +127,7 @@ void setup()
 
 	Serial.begin(115200);
 	mySerial.begin(9600);
-	delay(1000);
+	delay(4000);
 	mySerial.flush();
 
 	//reset the ANT+ module
@@ -330,14 +330,17 @@ void SetNetwork() //thisisANT.com and become an ANT+ Adopter
 	buf[1] = 0x09; // LENGTH Byte
 	buf[2] = MESG_NETWORK_KEY_ID; // ID Byte 0x46
 	buf[3] = 0x00; // Data Byte N (Network Number)
-	buf[4] = 0xB9; // Data Byte N (Public Network Key)
-	buf[5] = 0xA5; // Data Byte N (Public Network Key)
-	buf[6] = 0x21; // Data Byte N (Public Network Key)
-	buf[7] = 0xFB; // Data Byte N (Public Network Key)
-	buf[8] = 0xBD; // Data Byte N (Public Network Key)
-	buf[9] = 0x72; // Data Byte N (Public Network Key)
-	buf[10] = 0xC3; // Data Byte N (Public Network Key)
-	buf[11] = 0x45; // Data Byte N (Public Network Key)
+	
+	//go to www.thisisant.com to get your key, it's free you just need to register
+	
+	buf[4] = 0xXX; // Data Byte N (Public Network Key)
+	buf[5] = 0xXX; // Data Byte N (Public Network Key)
+	buf[6] = 0xXX; // Data Byte N (Public Network Key)
+	buf[7] = 0xXX; // Data Byte N (Public Network Key)
+	buf[8] = 0xXX; // Data Byte N (Public Network Key)
+	buf[9] = 0xXX; // Data Byte N (Public Network Key)
+	buf[10] = 0xXX; // Data Byte N (Public Network Key)
+	buf[11] = 0xXX; // Data Byte N (Public Network Key)
 	buf[12] = checkSum(buf, 12);
 	ANTsend(buf,13);
 }
@@ -526,7 +529,7 @@ void read_torque() {
   if (torque_in_lbs < 0){
     torque_Nm = 0;
   }else{
-    torque_Nm = (torque_in_lbs)*0.112984829;
+    torque_Nm = (torque_in_lbs)*0.112984829*1.072;  //1.072 is factor found with weight calibration
   }
 }
 
