@@ -10,19 +10,43 @@
 #define MESG_CHANNEL_SEARCH_TIMEOUT_ID ((UCHAR)0x44) // Set Channel Search Timeout 0x44
 #define MESG_OPEN_CHANNEL_ID ((UCHAR)0x4B) // ID Byte 0x4B
 #define MESG_BROADCAST_DATA_ID ((UCHAR)0x4E)
-#include <SoftwareSerial.h>
 
+//OLED Display
+#define USE_OLCD
+
+#include <SPI.h>
+//#include <Wire.h>
+//#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#include <Bounce2.h>
+
+//Pins for ANT+ Device Display
 #define RTS_PIN 2
 #define SUSPEND 6
 #define SLEEP 4
-#define RESET 7
+#define RESET 9
+
+//Pins for Torque Zero Button
+#define TORQUE_ZERO_PIN 8
+
+#if defined(USE_OLCD)
+  //OLED Display
+  #define OLED_RESET 10 //was 8 make sure this still works
+  Adafruit_SSD1306 display(OLED_RESET);
+  #define LOGO16_GLCD_HEIGHT 16 
+  #define LOGO16_GLCD_WIDTH  16 
+  #if (SSD1306_LCDHEIGHT != 64)
+    #error(F("Height incorrect, please fix Adafruit_SSD1306.h!"));
+  #endif
+#endif
+
 
 // ****************************************************************************
 // *************************  GLOBALS for Read CycelOps************************
 // ****************************************************************************
-static const int WHEEL_DATA = 2;
-static const int WHEEL_MAGNET = 3;
-static const int CLOCK_OUT = 12;
+static const int WHEEL_DATA = 7;
+static const int CLOCK_OUT = 16;
 static const double WHEEL_SLOPE = 527.2213800;
 static const double WHEEL_OFFSET = -3181.8199961;
 static const double GEAR_RATIO = 0.269230769;
@@ -36,7 +60,6 @@ boolean is_data_bit;
 int bit_read_count;
 int bit_delay;
 
-//int data_bits = 140;//old value
 int data_bits = 100;
 
 //Timers
@@ -45,23 +68,23 @@ unsigned long last_time_us;
 unsigned long delay_reset_us;
 unsigned long wheel_time_now;
 unsigned long wheel_time_last;
-double external_wheel_speed_usec;
 
 //array to store data
-boolean data_input[255];
+boolean data_input[200];
 int data_start_test_bits = 38;
 int data_position;
 int torque;
-double torque_in_lbs;
+int torque_in_lbs;
 unsigned int wheel_speed;
 double wheel_period; //time in us for 1 wheel rotation
+
+// Instantiate a Bounce object for zeroing the torque
+Bounce torque_zero_input = Bounce(); 
 
 
 // ****************************************************************************
 // *************************  GLOBALS for Power Out**********************
 // ****************************************************************************
-
-SoftwareSerial mySerial(8,9); //RX on Pin 8, TX on Pin 9
 
 const int Mag_pickup = 3; // the number of the pushbutton pin
 //int pin = 13;
@@ -104,43 +127,66 @@ void setup()
 	wheel_time_last = 0;
 	bit_read_count = 0;
 
+  torque = 0;
+  torque_in_lbs = 0;
+  ANT_icad = 0;
+  ANT_INST_power = 0;
+
 	digitalWrite(CLOCK_OUT, LOW);
 
 	pinMode(WHEEL_DATA, INPUT);
-	pinMode(WHEEL_MAGNET, INPUT);
 	pinMode(CLOCK_OUT, OUTPUT);
-	current_time_us = micros();
-	last_time_us = current_time_us;
-	//attachInterrupt(digitalPinToInterrupt(WHEEL_MAGNET), wheel_magnet_passing, FALLING);
+ 
+ //setup for Torque zero button
+  pinMode(TORQUE_ZERO_PIN, INPUT_PULLUP);
+  // After setting up the button, setup the Bounce instance :
+  torque_zero_input.attach(TORQUE_ZERO_PIN);
+  torque_zero_input.interval(50); // interval in ms
+
+
 	
 	
 	//Setup for PowerOut
-	pinMode(SUSPEND, OUTPUT);           // set pin to input
-	pinMode(SLEEP, OUTPUT);           // set pin to input
-	pinMode(RESET, OUTPUT);           // set pin to input
-	pinMode(RTS_PIN, INPUT);           // set pin to input
+	pinMode(SUSPEND, OUTPUT);           // set pin to output
+	pinMode(SLEEP, OUTPUT);             // set pin to output
+	pinMode(RESET, OUTPUT);             // set pin to output
+	pinMode(RTS_PIN, INPUT);            // set pin to input
 
 	digitalWrite(RESET, HIGH);       // turn on pullup resistors
-	digitalWrite(SUSPEND, HIGH);       // turn on pullup resistors
-	digitalWrite(SLEEP, LOW);       // turn on pullup resistors
+	digitalWrite(SUSPEND, HIGH);      // turn on pullup resistors
+	digitalWrite(SLEEP, LOW);         // turn on pullup resistors
 
 
-	Serial.begin(115200);
-	mySerial.begin(9600);
-	delay(4000);
-	mySerial.flush();
+	Serial.begin(115200); //this is the USB port serial
+	Serial1.begin(9600); //this is the hardware UART
+	
+	delay(1000);
+	Serial1.flush();
 
 	//reset the ANT+ module
 	digitalWrite(RESET, LOW);       // turn on pullup resistors
 	delay(5);
 	digitalWrite(RESET, HIGH);       // turn on pullup resistors
 
+  #if defined(USE_OLCD)
+    //Setup for OLCD
+    // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
+    display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64) 
+    display.clearDisplay();   
+    update_OLED();  
+  #endif
+    
 	delay(50);
 	initiate();
 	delay(20);
 
+  basicpower();
+  
 	//interrupt for wheel data from CycleOps
 	attachInterrupt(digitalPinToInterrupt(WHEEL_DATA), find_start_of_wheel_data, RISING);
+
+  current_time_us = micros();
+  last_time_us = current_time_us;
 }
 
 void loop()
@@ -158,9 +204,11 @@ void loop()
 	}
 
 	if (is_data_bit)
-	bit_delay = 1770;
-	else
-	bit_delay = 1545;
+	  //bit_delay = 1765;
+   bit_delay = 1760; //delay for data bits
+  else
+	  //bit_delay = 1525;
+   bit_delay = 1535; //delay for dead bits
 
 	if (is_data_bit && bit_read_count == 4){
 		is_data_bit = 0;
@@ -195,24 +243,26 @@ void loop()
 			read_torque();
 			read_speed();
 			recalc = 1;
-			
-			
-			//for (i=0; i<=data_bits; i++){
-			//  Serial.print(data_input[i]);
-			//}
-			//Serial.print(" ");
-			//Serial.print(torque,DEC);
-			//Serial.print(" ");
-			//Serial.print(wheel_speed,DEC);
-			//Serial.print(" ");
+
+
+			for (i=0; i<=data_bits; i++){
+			  Serial.print(data_input[i]);
+			}
+			Serial.print(" ");
+			Serial.print(torque,DEC);
+			Serial.print(" ");
+			Serial.print(wheel_speed,DEC);
+			Serial.print(" ");
 			//Serial.print(torque_in_lbs,1);
 			//Serial.print(" ");        
-			//Serial.print(cadence_RPM,1);
+			Serial.print(ANT_icad,1);
 			//cal_wheel_speed();
 			//Serial.print(" ");
 			//Serial.print(external_wheel_speed_usec,0);
-			//Serial.println("");
-			
+			Serial.println("");
+
+
+      
 			data_position = 0;
 			delay_reset_us = current_time_us;
 			reset_ready = 1;
@@ -228,78 +278,58 @@ void loop()
 		bit_read_count = 0;		
 	}
 
-	if (recalc == 1)
+  if (recalc == 1)
 	{
 		ANT_event++;
-		//period = time1 - time2; // Time to complete one revolution in microseconds
-		//omega = 6283185.3072/period; // Angular velocity rad/s
-		
 		ANT_icad = uint8_t(omega*9.549296586*GEAR_RATIO); // Cadence (RPM)
 				
-		//int sensorValue = analogRead(A0); // Read Analog Voltage on A0
-		//float volt= sensorValue * (5.0 / 1023.0); // Convert the analog reading (which goes from 0 - 1023) to a voltage (0 - 5V):
-		//torque_kgm=0.3413*volt*volt+0.2852*volt-0.0238; // Curve fit equation relating voltage to torque kg-m
-		//torque_Nm=9.80665*torque_kgm; // Torque kg-m converted to Torque N-m
-		
 		ANT_INST_power = uint16_t(torque_Nm*omega); // Instant power calculated
 		ANT_power += ANT_INST_power; // Incremental power calcualted
-		//Serial.print("period: ");
-		//Serial.print(period);
-    Serial.print("Torque(raw): ");
-    Serial.print(torque,DEC);
-    Serial.print("\t Wheel Speed (RAW) ");
-    Serial.print(wheel_speed,DEC);
-		Serial.print("\t omega: ");
+
+    //TEST CODE
+    //ANT_icad = 50;
+    //ANT_INST_power = 100;
+    //ANT_power += ANT_INST_power; // Incremental power calcualted
+    //TEST
+    
+    /*
+		Serial.print(F("Torque(raw): "));
+		Serial.print(torque,DEC);
+		Serial.print(F("\t Wheel Speed (RAW) "));
+		Serial.print(wheel_speed,DEC);
+		Serial.print(F("\t omega: "));
 		Serial.print(omega);
-		Serial.print("\t RPM: "); //REM
+		Serial.print(F("\t RPM: ")); //REM
 		Serial.print(ANT_icad); //REM
-		Serial.print("\t Torque(in-lbs): "); //REM
+		Serial.print(F("\t Torque(in-lbs): ")); //REM
 		Serial.print(torque_in_lbs); //REM
-		Serial.print("\t Torque(N-m): "); //REM
+		Serial.print(F("\t Torque(N-m): ")); //REM
 		Serial.print(torque_Nm); //REM
-		Serial.print("\t Power: "); //REM
+		Serial.print(F("\t Power: ")); //REM
 		Serial.print(ANT_INST_power); //REM
-		Serial.print("\t ANT Event: "); //REM
+		Serial.print(F("\t ANT Event: ")); //REM
 		Serial.print(ANT_event); //REM
-		Serial.print("\t ACC Power: "); //REM
+		Serial.print(F("\t ACC Power: ")); //REM
 		Serial.println(ANT_power); //REM
+    */
 
 		basicpower(); // Main ANT tranmission of Basic Power Data and RPM
-		mySerial.flush();
+		Serial1.flush();
+
+    #if defined(USE_OLCD)
+       update_OLED();
+    #endif    
 		recalc = 0;
 	}
-}
 
-
-void Crank_Pickup()
-{
-	int reading = digitalRead(Mag_pickup);
-	if (reading != lastButtonState) {
-		// reset the debouncing timer
-		lastDebounceTime = millis();
-		sent = 0;
-	} 
-
-	if ((millis() - lastDebounceTime) > debounceDelay) {
-		buttonState = reading;
-		if (buttonState == 1)
-		{
-			if (sent == 0)
-			{
-				sent = 1;
-				blink(); 
-			}
-		}
-	}
-	lastButtonState = reading; 
-}
-
-void blink()
-{
-	recalc = 1;
-	state = !state;
-	time2 = time1;
-	time1 = micros();
+  // Update the Bounce instance :
+  torque_zero_input.update();
+  if(!torque_zero_input.read())
+  {
+    TORQUE_OFFSET = torque;    
+    update_OLED();
+  }  
+  
 }
 
 UCHAR checkSum(UCHAR *data, int length)
@@ -331,8 +361,7 @@ void SetNetwork() //thisisANT.com and become an ANT+ Adopter
 	buf[2] = MESG_NETWORK_KEY_ID; // ID Byte 0x46
 	buf[3] = 0x00; // Data Byte N (Network Number)
 	
-	//go to www.thisisant.com to get your key, it's free you just need to register
-	
+	//go to www.thisisant.com to get your key, it's free you just need to register	
 	buf[4] = 0xXX; // Data Byte N (Public Network Key)
 	buf[5] = 0xXX; // Data Byte N (Public Network Key)
 	buf[6] = 0xXX; // Data Byte N (Public Network Key)
@@ -340,7 +369,8 @@ void SetNetwork() //thisisANT.com and become an ANT+ Adopter
 	buf[8] = 0xXX; // Data Byte N (Public Network Key)
 	buf[9] = 0xXX; // Data Byte N (Public Network Key)
 	buf[10] = 0xXX; // Data Byte N (Public Network Key)
-	buf[11] = 0xXX; // Data Byte N (Public Network Key)
+	buf[11] = 0xXX; // Data Byte N (Public Network Key)	
+	
 	buf[12] = checkSum(buf, 12);
 	ANTsend(buf,13);
 }
@@ -378,7 +408,7 @@ void ANTsend(uint8_t buf[], int length){
 	{
 		//Serial.print(buf[i], HEX);
 		//Serial.print(" ");
-		mySerial.write(buf[i]);
+		Serial1.write(buf[i]);
 	}
 	//Serial.println("");
 }
@@ -488,7 +518,11 @@ void read_wheel_data(){
 	if(start_reading){
 		data_input[data_position] = digitalRead(WHEEL_DATA);
 		digitalWrite(CLOCK_OUT, HIGH);
-		delayMicroseconds(300);
+    if(is_data_bit){
+		  delayMicroseconds(200);
+    }else{
+      delayMicroseconds(100);
+    }
 		digitalWrite(CLOCK_OUT, LOW);
 		data_position++;
 	}
@@ -497,17 +531,12 @@ void read_wheel_data(){
 void find_start_of_wheel_data() {
 	if (data_position ==  0 && reset_ready == 0){
 		new_data_set = 1;
-		last_time_us = current_time_us - 950;
+		last_time_us = current_time_us - 1050; //almost working value was 950
 		is_data_bit = 1;  
 		bit_read_count = 0;
 	}
 	//Serial.print("found start = ");
 	//Serial.println(current_time_us);
-}
-
-void wheel_magnet_passing() {
-	wheel_time_last = wheel_time_now;
-	wheel_time_now = micros();  
 }
 
 void read_torque() {
@@ -528,8 +557,9 @@ void read_torque() {
 	torque_in_lbs = (double)torque - (double)TORQUE_OFFSET;
   if (torque_in_lbs < 0){
     torque_Nm = 0;
+    torque_in_lbs = 0;
   }else{
-    torque_Nm = (torque_in_lbs)*0.112984829*1.072;  //1.072 is factor found with weight calibration
+    torque_Nm = (torque_in_lbs)*0.112984829; 
   }
 }
 
@@ -550,22 +580,39 @@ void read_speed() {
 
 	if (wheel_speed == 4095){
 		omega = 0;
-	}else{
-		//cadence_RPM = (1/(wheel_speed*WHEEL_SLOPE+WHEEL_OFFSET))*16.1538461538462;		
+	}else{	
 		wheel_period = wheel_speed*WHEEL_SLOPE+WHEEL_OFFSET;
 		omega = 6283185.30718/wheel_period;		
 	}
-
 }
 
-void cal_wheel_speed() {
-	if (wheel_time_now == wheel_time_last){
-		external_wheel_speed_usec = 0;
-	}else if (wheel_time_now < wheel_time_last){
-		external_wheel_speed_usec = 0;
-	} else {
-		external_wheel_speed_usec = (wheel_time_now - wheel_time_last);
-	}
+#if defined(USE_OLCD)
+  void update_OLED() {
+      display.clearDisplay();
+        // text display tests
+      display.setTextSize(1); // printable sizes from 1 to 8; typical use is 1, 2 or 4
+      display.setTextColor(WHITE);    
+      display.setCursor(0,0); // begin text at this location, X,Y
+      display.print("O:");
+      display.print(TORQUE_OFFSET,1);
+      display.setCursor(40,0); // begin text at this location, X,Y
+      display.print("R:");
+      display.print(torque,1);
+      display.setCursor(80,0); // begin text at this location, X,Y
+      display.print("T:");
+      display.println(torque_in_lbs,1);
+      //display.setTextColor(BLACK, WHITE); // 'inverted' text
+      //display.setCursor(80,0); // begin text at this location, X,Y
+      //display.print("C:");
+      //display.println(ANT_icad,1);
+      display.setTextSize(2);
+      display.print("P:");
+      display.println(ANT_INST_power,1);
+      display.print("C:");
+      display.println(ANT_icad,1);
+      display.display();
+  }    
+#endif
 
-}
+
 
