@@ -2694,6 +2694,7 @@ at 30/07/2012 17:45:58</description>
 <wire x1="213.36" y1="27.94" x2="213.36" y2="30.48" width="0.1524" layer="91"/>
 <wire x1="213.36" y1="30.48" x2="198.12" y2="30.48" width="0.1524" layer="91"/>
 <junction x="198.12" y="30.48"/>
+<junction x="190.5" y="30.48"/>
 </segment>
 <segment>
 <pinref part="B1" gate="G$1" pin="VCC"/>
