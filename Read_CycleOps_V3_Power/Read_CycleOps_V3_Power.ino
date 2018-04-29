@@ -30,6 +30,10 @@
 //Pins for Torque Zero Button
 #define TORQUE_ZERO_PIN 8
 
+//Conversion Constants
+#define WHEEL_SPEED_CONVERSION 6283185.30718
+#define TORQUE_INLBS_TO_NM 0.112984829
+
 #if defined(USE_OLCD)
 //OLED Display
 #define OLED_RESET 10 //was 8 make sure this still works
@@ -248,18 +252,18 @@ void loop()
       for (i = 0; i <= data_bits; i++) {
         Serial.print(data_input[i]);
       }
-      Serial.print(" ");
+      Serial.print(F(" "));
       Serial.print(torque, DEC);
-      Serial.print(" ");
+      Serial.print(F(" "));
       Serial.print(wheel_speed, DEC);
-      Serial.print(" ");
+      Serial.print(F(" "));
       //Serial.print(torque_in_lbs,1);
       //Serial.print(" ");
       Serial.print(ANT_icad, 1);
       //cal_wheel_speed();
       //Serial.print(" ");
       //Serial.print(external_wheel_speed_usec,0);
-      Serial.println("");
+      Serial.println(F(""));
 
 
 
@@ -391,7 +395,7 @@ void SetChID()
   buf[1] = 0x05; // LENGTH Byte
   buf[2] = MESG_CHANNEL_ID_ID; // Assign Channel ID 0x51
   buf[3] = 0x00; // channel number
-  buf[4] = 0x05; // Device number
+  buf[4] = 0x06; // Device number
   buf[5] = 0x00; // Device number
   buf[6] = 0x0B; //Device type ID
   buf[7] = 0x00; //Transmission type -CHANGED
@@ -560,7 +564,7 @@ void read_torque() {
     torque_Nm = 0;
     torque_in_lbs = 0;
   } else {
-    torque_Nm = (torque_in_lbs) * 0.112984829;
+    torque_Nm = (torque_in_lbs) * TORQUE_INLBS_TO_NM;
   }
 }
 
@@ -583,34 +587,48 @@ void read_speed() {
     omega = 0;
   } else {
     wheel_period = wheel_speed * WHEEL_SLOPE + WHEEL_OFFSET;
-    omega = 6283185.30718 / wheel_period;
+    omega = WHEEL_SPEED_CONVERSION / wheel_period;
   }
 }
 
 #if defined(USE_OLCD)
 void update_OLED() {
+  //char temp_string[4];
+  
   display.clearDisplay();
   // text display tests
   display.setTextSize(1); // printable sizes from 1 to 8; typical use is 1, 2 or 4
   display.setTextColor(WHITE);
   display.setCursor(0, 0); // begin text at this location, X,Y
-  display.print("O:");
+  display.print(F("O:"));
   display.print(TORQUE_OFFSET, 1);
   display.setCursor(40, 0); // begin text at this location, X,Y
-  display.print("R:");
+  display.print(F("R:"));
   display.print(torque, 1);
   display.setCursor(80, 0); // begin text at this location, X,Y
-  display.print("T:");
+  display.print(F("T:"));
   display.println(torque_in_lbs, 1);
   //display.setTextColor(BLACK, WHITE); // 'inverted' text
   //display.setCursor(80,0); // begin text at this location, X,Y
   //display.print("C:");
   //display.println(ANT_icad,1);
   display.setTextSize(2);
-  display.print("P:");
+  
+  display.print(F("  W:"));
+  
+  //sprintf(temp_string, "%4d", ANT_INST_power);
+  //display.print(temp_string);
+  
   display.println(ANT_INST_power, 1);
-  display.print("C:");
-  display.println(ANT_icad, 1);
+  //display.println(F(" W"));
+    
+  display.print(F("RPM:"));
+  
+  //sprintf(temp_string, "%4d", ANT_icad);
+  //display.print(temp_string);
+  
+  display.print(ANT_icad, 1);
+  //display.println(F(" RPM"));
   display.display();
 }
 #endif
