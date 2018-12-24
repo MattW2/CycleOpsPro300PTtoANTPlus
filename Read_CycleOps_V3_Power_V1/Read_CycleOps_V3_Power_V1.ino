@@ -48,6 +48,10 @@ static const int CLOCK_OUT = 16;
 static const double WHEEL_SLOPE = 527.2213800;
 static const double WHEEL_OFFSET = -3181.8199961;
 static const double GEAR_RATIO = 0.269230769;
+static const bool VALID_START_DATA[34] = {1,1,1,1,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,1,1,0,1};
+
+//1111000000111100000010110000001101
+
 
 int TORQUE_OFFSET = 512;
 
@@ -201,8 +205,6 @@ void setup()
 void loop()
 {
 	int i;
-
-	// put your main code here, to run repeatedly:
 	current_time_us = micros();
 
 	if (new_data_set) {
@@ -213,11 +215,11 @@ void loop()
 	}
 
 	if (is_data_bit)
-	//bit_delay = 1765;
-	bit_delay = 1760; //delay for data bits
+		//bit_delay = 1765;
+		bit_delay = 1760; //delay for data bits
 	else
-	//bit_delay = 1525;
-	bit_delay = 1535; //delay for dead bits
+		//bit_delay = 1525;
+		bit_delay = 1535; //delay for dead bits
 
 	if (is_data_bit && bit_read_count == 4) {
 		is_data_bit = 0;
@@ -241,19 +243,21 @@ void loop()
 		start_reading = 0;
 		//test if data is valid
 		//valid data start with 11110000001111000000101100000011001
+		
+		/*
 		if (data_input[0] && data_input[1] && data_input[2] && data_input[3] &&
 				!data_input[4] && !data_input[5] && !data_input[6] && !data_input[7] && !data_input[8] && !data_input[9] &&
 				data_input[10] && data_input[11] && data_input[12] && data_input[13] &&
 				!data_input[14] && !data_input[15] && !data_input[16] && !data_input[17] && !data_input[18] && !data_input[19] &&
 				data_input[20] && !data_input[21] && data_input[22] && data_input[23] &&
 				!data_input[24] && !data_input[25] && !data_input[26] && !data_input[27] && !data_input[28] && !data_input[29] &&
-				data_input[30] && data_input[31] && !data_input[32] && data_input[23]
+				data_input[30] && data_input[31] && !data_input[32] && data_input[33]
 				) {
+		*/
+		if (memcmp(data_input,VALID_START_DATA,34) == 0) {			
 			read_torque();
 			read_speed();
 			recalc = 1;
-
-
 			for (i = 0; i <= data_bits; i++) {
 				Serial.print(data_input[i]);
 			}
