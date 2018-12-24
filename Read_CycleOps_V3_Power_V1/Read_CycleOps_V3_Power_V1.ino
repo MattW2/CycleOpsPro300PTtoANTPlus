@@ -14,10 +14,13 @@
 //OLED Display
 #define USE_OLCD
 
-#include <SPI.h>
+//#include <SPI.h>
 //#include <Wire.h>
 //#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+
+//#include <Adafruit_SSD1306.h> //swtiched to SSD1306Ascii to save memory
+#include "SSD1306Ascii.h"
+#include "SSD1306AsciiAvrI2c.h"
 
 #include <Bounce2.h>
 
@@ -35,14 +38,11 @@
 #define TORQUE_INLBS_TO_NM 0.112984829
 
 #if defined(USE_OLCD)
-//OLED Display
-#define OLED_RESET 10 //was 8 make sure this still works
-Adafruit_SSD1306 display(OLED_RESET);
-#define LOGO16_GLCD_HEIGHT 16
-#define LOGO16_GLCD_WIDTH  16
-#if (SSD1306_LCDHEIGHT != 64)
-#error(F("Height incorrect, please fix Adafruit_SSD1306.h!"));
-#endif
+  //OLED Display
+  #define OLED_RESET -1
+  // 0X3C+SA0 - 0x3C or 0x3D
+  #define I2C_ADDRESS 0x3C
+  SSD1306AsciiAvrI2c display; 
 #endif
 
 
@@ -175,9 +175,26 @@ void setup()
 #if defined(USE_OLCD)
   //Setup for OLCD
   // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)
-  display.clearDisplay();
-  update_OLED();
+  #if OLED_RESET >= 0
+    display.begin(&Adafruit128x64, I2C_ADDRESS, RST_PIN);
+  #else // OLED_RESET >= 0
+    display.begin(&Adafruit128x64, I2C_ADDRESS);
+  #endif // OLED_RESET >= 0
+    // Call display.setI2cClock(frequency) to change from the default frequency.
+  display.setFont(Adafruit5x7);  
+  uint32_t m = micros();
+  display.clear();
+  display.println("Hello world!");
+  display.println("A long line may be truncated");
+  display.println();
+  display.set2X();
+  display.println("2X demo");
+  display.set1X();
+  display.print("\nmicros: ");
+  display.print(micros() - m);
+  
+  Serial.println("OLED TEST DONE");
+    
 #endif
 
   delay(50);
@@ -264,8 +281,6 @@ void loop()
       //Serial.print(" ");
       //Serial.print(external_wheel_speed_usec,0);
       Serial.println(F(""));
-
-
 
       data_position = 0;
       delay_reset_us = current_time_us;
@@ -594,11 +609,9 @@ void read_speed() {
 #if defined(USE_OLCD)
 void update_OLED() {
   //char temp_string[4];
-  
-  display.clearDisplay();
+  display.clear();
   // text display tests
-  display.setTextSize(1); // printable sizes from 1 to 8; typical use is 1, 2 or 4
-  display.setTextColor(WHITE);
+  display.set1X(); // printable sizes from 1 to 8; typical use is 1, 2 or 4
   display.setCursor(0, 0); // begin text at this location, X,Y
   display.print(F("O:"));
   display.print(TORQUE_OFFSET, 1);
@@ -612,7 +625,7 @@ void update_OLED() {
   //display.setCursor(80,0); // begin text at this location, X,Y
   //display.print("C:");
   //display.println(ANT_icad,1);
-  display.setTextSize(2);
+  display.set2X();
   
   display.print(F("  W:"));
   
@@ -629,9 +642,6 @@ void update_OLED() {
   
   display.print(ANT_icad, 1);
   //display.println(F(" RPM"));
-  display.display();
+  
 }
 #endif
-
-
-
