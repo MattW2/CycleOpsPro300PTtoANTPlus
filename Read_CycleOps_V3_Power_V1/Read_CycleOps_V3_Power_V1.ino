@@ -50,9 +50,6 @@ static const double WHEEL_OFFSET = -3181.8199961;
 static const double GEAR_RATIO = 0.269230769;
 static const bool VALID_START_DATA[34] = {1,1,1,1,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,1,1,0,1};
 
-//1111000000111100000010110000001101
-
-
 int TORQUE_OFFSET = 512;
 
 boolean start_reading;
@@ -75,6 +72,7 @@ unsigned long wheel_time_last;
 boolean data_input[200];
 int data_start_test_bits = 38;
 int data_position;
+int last_torque; //used to track the last valid torque, needed to deal with noise spikes on the bike
 int torque;
 int torque_in_lbs;
 unsigned int wheel_speed;
@@ -125,6 +123,7 @@ void setup()
 	wheel_time_last = 0;
 	bit_read_count = 0;
 
+	last_torque = TORQUE_OFFSET;
 	torque = 0;
 	torque_in_lbs = 0;
 	ANT_icad = 0;
@@ -242,18 +241,6 @@ void loop()
 	if (data_position == data_bits) { //time to spit out the data and reset
 		start_reading = 0;
 		//test if data is valid
-		//valid data start with 11110000001111000000101100000011001
-		
-		/*
-		if (data_input[0] && data_input[1] && data_input[2] && data_input[3] &&
-				!data_input[4] && !data_input[5] && !data_input[6] && !data_input[7] && !data_input[8] && !data_input[9] &&
-				data_input[10] && data_input[11] && data_input[12] && data_input[13] &&
-				!data_input[14] && !data_input[15] && !data_input[16] && !data_input[17] && !data_input[18] && !data_input[19] &&
-				data_input[20] && !data_input[21] && data_input[22] && data_input[23] &&
-				!data_input[24] && !data_input[25] && !data_input[26] && !data_input[27] && !data_input[28] && !data_input[29] &&
-				data_input[30] && data_input[31] && !data_input[32] && data_input[33]
-				) {
-		*/
 		if (memcmp(data_input,VALID_START_DATA,34) == 0) {			
 			read_torque();
 			read_speed();
@@ -272,8 +259,10 @@ void loop()
 			//cal_wheel_speed();
 			//Serial.print(" ");
 			//Serial.print(external_wheel_speed_usec,0);
+      Serial.print(F(" "));
+      Serial.print(ANT_INST_power, 1);
 			Serial.println(F(""));
-
+      
 			data_position = 0;
 			delay_reset_us = current_time_us;
 			reset_ready = 1;
@@ -338,6 +327,7 @@ void loop()
 	if (!torque_zero_input.read())
 	{
 		TORQUE_OFFSET = torque;
+		last_torque = torque;
 		update_OLED();
 	}
 
@@ -362,7 +352,6 @@ void reset ()
 	buf[4] = checkSum(buf, 4);
 	ANTsend(buf, 5);
 }
-
 
 void SetNetwork() //thisisANT.com and become an ANT+ Adopter
 {
@@ -519,8 +508,6 @@ void basicpower()
 	ANTsend(buf, 13);
 }
 
-
-
 //functions for getting data from cycleops
 void read_wheel_data() {
 	if (start_reading) {
@@ -565,7 +552,12 @@ void read_torque() {
 	bitWrite(torque, 2, data_input[61]);
 	bitWrite(torque, 1, data_input[62]);
 	bitWrite(torque, 0, data_input[63]);
-
+	
+	if(abs(torque - last_torque) >= 500){
+		torque = last_torque;
+	} else {
+		last_torque = torque;
+	}
 	torque_in_lbs = (double)torque - (double)TORQUE_OFFSET;
 	if (torque_in_lbs < 0) {
 		torque_Nm = 0;
