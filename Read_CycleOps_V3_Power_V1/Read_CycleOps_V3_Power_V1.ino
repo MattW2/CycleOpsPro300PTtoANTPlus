@@ -181,20 +181,22 @@ void setup()
     display.begin(&Adafruit128x64, I2C_ADDRESS);
   #endif // OLED_RESET >= 0
     // Call display.setI2cClock(frequency) to change from the default frequency.
-  display.setFont(Adafruit5x7);  
-  uint32_t m = micros();
-  display.clear();
-  display.println("Hello world!");
-  display.println("A long line may be truncated");
-  display.println();
-  display.set2X();
-  display.println("2X demo");
-  display.set1X();
-  display.print("\nmicros: ");
-  display.print(micros() - m);
+  display.setFont(Adafruit5x7);    
+  display.clear(); 
   
-  Serial.println("OLED TEST DONE");
-    
+  // setup display with no data
+  display.set1X();
+  display.setCursor(0, 0); // begin text at this location, X,Y
+  display.print(F("O:"));
+  display.setCursor(40, 0); // begin text at this location, X,Y
+  display.print(F("R:"));
+  display.setCursor(80, 0); // begin text at this location, X,Y
+  display.print(F("T:"));
+  display.setCursor(0, 1); // begin text at this location, X,Y
+  display.set2X();  
+  display.print(F("  W:"));  
+  display.setCursor(0, 4); // begin text at this location, X,Y  
+  display.print(F("RPM:"));
 #endif
 
   delay(50);
@@ -609,11 +611,11 @@ void read_speed() {
 #if defined(USE_OLCD)
 void update_OLED() {
   //char temp_string[4];
-  display.clear();
   // text display tests
-  display.set1X(); // printable sizes from 1 to 8; typical use is 1, 2 or 4
+  display.set1X();
   display.setCursor(0, 0); // begin text at this location, X,Y
   display.print(F("O:"));
+  display.clearToEOL();
   display.print(TORQUE_OFFSET, 1);
   display.setCursor(40, 0); // begin text at this location, X,Y
   display.print(F("R:"));
@@ -621,27 +623,14 @@ void update_OLED() {
   display.setCursor(80, 0); // begin text at this location, X,Y
   display.print(F("T:"));
   display.println(torque_in_lbs, 1);
-  //display.setTextColor(BLACK, WHITE); // 'inverted' text
-  //display.setCursor(80,0); // begin text at this location, X,Y
-  //display.print("C:");
-  //display.println(ANT_icad,1);
-  display.set2X();
-  
-  display.print(F("  W:"));
-  
-  //sprintf(temp_string, "%4d", ANT_INST_power);
-  //display.print(temp_string);
-  
+  display.setCursor(0, 1); // begin text at this location, X,Y
+  display.set2X();  
+  display.print(F("  W:")); 
+  display.clearToEOL();  
   display.println(ANT_INST_power, 1);
-  //display.println(F(" W"));
-    
+  display.setCursor(0, 4); // begin text at this location, X,Y  
   display.print(F("RPM:"));
-  
-  //sprintf(temp_string, "%4d", ANT_icad);
-  //display.print(temp_string);
-  
+  display.clearToEOL();
   display.print(ANT_icad, 1);
-  //display.println(F(" RPM"));
-  
 }
 #endif
