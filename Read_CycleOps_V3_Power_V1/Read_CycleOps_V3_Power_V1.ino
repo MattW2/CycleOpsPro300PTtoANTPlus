@@ -48,7 +48,7 @@ static const int CLOCK_OUT = 16;
 static const double WHEEL_SLOPE = 527.2213800;
 static const double WHEEL_OFFSET = -3181.8199961;
 static const double GEAR_RATIO = 0.269230769;
-static const bool VALID_START_DATA[34] = {1,1,1,1,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,1,1,0,1};
+static const bool VALID_START_DATA[19] = {1,1,1,1,0,1,1,1,1,0,1,0,1,1,0,1,1,0,1};
 
 int TORQUE_OFFSET = 512;
 
@@ -59,7 +59,7 @@ boolean is_data_bit;
 int bit_read_count;
 int bit_delay;
 
-int data_bits = 100;
+int data_bits = 69;
 
 //Timers
 unsigned long current_time_us;
@@ -69,13 +69,14 @@ unsigned long wheel_time_now;
 unsigned long wheel_time_last;
 
 //array to store data
-boolean data_input[200];
+boolean data_input[70];
 int data_start_test_bits = 38;
 int data_position;
 int last_torque; //used to track the last valid torque, needed to deal with noise spikes on the bike
 int torque;
 int torque_in_lbs;
 unsigned int wheel_speed;
+unsigned int CycleOps_CheckSum;
 double wheel_period; //time in us for 1 wheel rotation
 
 // Instantiate a Bounce object for zeroing the torque
@@ -128,6 +129,7 @@ void setup()
 	torque_in_lbs = 0;
 	ANT_icad = 0;
 	ANT_INST_power = 0;
+	CycleOps_CheckSum = 0;
 
 	digitalWrite(CLOCK_OUT, LOW);
 
@@ -215,17 +217,17 @@ void loop()
 
 	if (is_data_bit)
 		//bit_delay = 1765;
-		bit_delay = 1760; //delay for data bits
+		bit_delay = 1875; //delay for data bits
 	else
 		//bit_delay = 1525;
-		bit_delay = 1535; //delay for dead bits
+		bit_delay = 8780; //delay for dead bits
 
 	if (is_data_bit && bit_read_count == 4) {
 		is_data_bit = 0;
 		bit_read_count = 0;
 	}
 
-	if (!is_data_bit && bit_read_count == 6) {
+	if (!is_data_bit && bit_read_count == 1) {
 		is_data_bit = 1;
 		bit_read_count = 0;
 	}
@@ -241,28 +243,11 @@ void loop()
 	if (data_position == data_bits) { //time to spit out the data and reset
 		start_reading = 0;
 		//test if data is valid
-		if (memcmp(data_input,VALID_START_DATA,34) == 0) {			
+		if (memcmp(data_input,VALID_START_DATA,19) == 0) {			
 			read_torque();
 			read_speed();
+			read_checkSum();
 			recalc = 1;
-			for (i = 0; i <= data_bits; i++) {
-				Serial.print(data_input[i]);
-			}
-			Serial.print(F(" "));
-			Serial.print(torque, DEC);
-			Serial.print(F(" "));
-			Serial.print(wheel_speed, DEC);
-			Serial.print(F(" "));
-			//Serial.print(torque_in_lbs,1);
-			//Serial.print(" ");
-			Serial.print(ANT_icad, 1);
-			//cal_wheel_speed();
-			//Serial.print(" ");
-			//Serial.print(external_wheel_speed_usec,0);
-      Serial.print(F(" "));
-      Serial.print(ANT_INST_power, 1);
-			Serial.println(F(""));
-      
 			data_position = 0;
 			delay_reset_us = current_time_us;
 			reset_ready = 1;
@@ -285,33 +270,22 @@ void loop()
 
 		ANT_INST_power = uint16_t(torque_Nm * omega); // Instant power calculated
 		ANT_power += ANT_INST_power; // Incremental power calcualted
-
-		//TEST CODE
-		//ANT_icad = 50;
-		//ANT_INST_power = 100;
-		//ANT_power += ANT_INST_power; // Incremental power calcualted
-		//TEST
-
-		/*
-	Serial.print(F("Torque(raw): "));
-	Serial.print(torque,DEC);
-	Serial.print(F("\t Wheel Speed (RAW) "));
-	Serial.print(wheel_speed,DEC);
-	Serial.print(F("\t omega: "));
-	Serial.print(omega);
-	Serial.print(F("\t RPM: ")); //REM
-	Serial.print(ANT_icad); //REM
-	Serial.print(F("\t Torque(in-lbs): ")); //REM
-	Serial.print(torque_in_lbs); //REM
-	Serial.print(F("\t Torque(N-m): ")); //REM
-	Serial.print(torque_Nm); //REM
-	Serial.print(F("\t Power: ")); //REM
-	Serial.print(ANT_INST_power); //REM
-	Serial.print(F("\t ANT Event: ")); //REM
-	Serial.print(ANT_event); //REM
-	Serial.print(F("\t ACC Power: ")); //REM
-	Serial.println(ANT_power); //REM
-	*/
+		
+	//write data to serial out
+		for (i = 0; i <= data_bits; i++) {
+			Serial.print(data_input[i]);
+		}
+		Serial.print(F(" "));
+		Serial.print(torque, DEC);
+		Serial.print(F(" "));
+		Serial.print(wheel_speed, DEC);
+		Serial.print(F(" "));
+		Serial.print(ANT_icad, 1);
+		Serial.print(F(" "));
+		Serial.print(ANT_INST_power, 1);
+		Serial.print(F(" "));
+		Serial.print(CycleOps_CheckSum, DEC);
+		Serial.println(F(""));
 
 		basicpower(); // Main ANT tranmission of Basic Power Data and RPM
 		Serial1.flush();
@@ -526,10 +500,10 @@ void read_wheel_data() {
 void find_start_of_wheel_data() {
 	if (data_position ==  0 && reset_ready == 0) {
 		//check if it is an error bit
-		delayMicroseconds(1000);
+		delayMicroseconds(700);
 		if(digitalRead(WHEEL_DATA)){
 			new_data_set = 1;
-			last_time_us = current_time_us - 700; //without error check use 1050
+			last_time_us = current_time_us - 1785; //without error check use 1050
 			is_data_bit = 1;
 			bit_read_count = 0;      
 		}
@@ -540,18 +514,18 @@ void find_start_of_wheel_data() {
 
 void read_torque() {
 	torque = 0;
-	bitWrite(torque, 11, data_input[40]);
-	bitWrite(torque, 10, data_input[41]);
-	bitWrite(torque, 9, data_input[42]);
-	bitWrite(torque, 8, data_input[43]);
-	bitWrite(torque, 7, data_input[50]);
-	bitWrite(torque, 6, data_input[51]);
-	bitWrite(torque, 5, data_input[52]);
-	bitWrite(torque, 4, data_input[53]);
-	bitWrite(torque, 3, data_input[60]);
-	bitWrite(torque, 2, data_input[61]);
-	bitWrite(torque, 1, data_input[62]);
-	bitWrite(torque, 0, data_input[63]);
+	bitWrite(torque, 11, data_input[20]);
+	bitWrite(torque, 10, data_input[21]);
+	bitWrite(torque, 9, data_input[22]);
+	bitWrite(torque, 8, data_input[23]);
+	bitWrite(torque, 7, data_input[25]);
+	bitWrite(torque, 6, data_input[26]);
+	bitWrite(torque, 5, data_input[27]);
+	bitWrite(torque, 4, data_input[28]);
+	bitWrite(torque, 3, data_input[30]);
+	bitWrite(torque, 2, data_input[31]);
+	bitWrite(torque, 1, data_input[32]);
+	bitWrite(torque, 0, data_input[33]);
 	
 	if(abs(torque - last_torque) >= 500){
 		torque = last_torque;
@@ -569,18 +543,18 @@ void read_torque() {
 
 void read_speed() {
 	wheel_speed = 0;
-	bitWrite(wheel_speed, 11, data_input[70]);
-	bitWrite(wheel_speed, 10, data_input[71]);
-	bitWrite(wheel_speed, 9, data_input[72]);
-	bitWrite(wheel_speed, 8, data_input[73]);
-	bitWrite(wheel_speed, 7, data_input[80]);
-	bitWrite(wheel_speed, 6, data_input[81]);
-	bitWrite(wheel_speed, 5, data_input[82]);
-	bitWrite(wheel_speed, 4, data_input[83]);
-	bitWrite(wheel_speed, 3, data_input[90]);
-	bitWrite(wheel_speed, 2, data_input[91]);
-	bitWrite(wheel_speed, 1, data_input[92]);
-	bitWrite(wheel_speed, 0, data_input[93]);
+	bitWrite(wheel_speed, 11, data_input[35]);
+	bitWrite(wheel_speed, 10, data_input[36]);
+	bitWrite(wheel_speed, 9, data_input[37]);
+	bitWrite(wheel_speed, 8, data_input[38]);
+	bitWrite(wheel_speed, 7, data_input[40]);
+	bitWrite(wheel_speed, 6, data_input[41]);
+	bitWrite(wheel_speed, 5, data_input[42]);
+	bitWrite(wheel_speed, 4, data_input[43]);
+	bitWrite(wheel_speed, 3, data_input[45]);
+	bitWrite(wheel_speed, 2, data_input[46]);
+	bitWrite(wheel_speed, 1, data_input[47]);
+	bitWrite(wheel_speed, 0, data_input[48]);
 
 	if (wheel_speed == 4095) {
 		omega = 0;
@@ -588,6 +562,27 @@ void read_speed() {
 		wheel_period = wheel_speed * WHEEL_SLOPE + WHEEL_OFFSET;
 		omega = WHEEL_SPEED_CONVERSION / wheel_period;
 	}
+}
+
+void read_checkSum() {
+	CycleOps_CheckSum = 0;
+	
+	bitWrite(CycleOps_CheckSum, 15, data_input[50]);
+	bitWrite(CycleOps_CheckSum, 14, data_input[51]);
+	bitWrite(CycleOps_CheckSum, 13, data_input[52]);
+	bitWrite(CycleOps_CheckSum, 12, data_input[53]);
+	bitWrite(CycleOps_CheckSum, 11, data_input[55]);
+	bitWrite(CycleOps_CheckSum, 10, data_input[56]);
+	bitWrite(CycleOps_CheckSum, 9, data_input[57]);
+	bitWrite(CycleOps_CheckSum, 8, data_input[58]);
+	bitWrite(CycleOps_CheckSum, 7, data_input[60]);
+	bitWrite(CycleOps_CheckSum, 6, data_input[61]);
+	bitWrite(CycleOps_CheckSum, 5, data_input[62]);
+	bitWrite(CycleOps_CheckSum, 4, data_input[63]);	
+	bitWrite(CycleOps_CheckSum, 3, data_input[65]);
+	bitWrite(CycleOps_CheckSum, 2, data_input[66]);
+	bitWrite(CycleOps_CheckSum, 1, data_input[67]);
+	bitWrite(CycleOps_CheckSum, 0, data_input[68]);
 }
 
 #if defined(USE_OLCD)
