@@ -54,16 +54,16 @@ int TORQUE_OFFSET = 512;
 
 boolean start_reading;
 boolean reset_ready;
-boolean new_data_set;
-boolean is_data_bit;
-int bit_read_count;
+volatile boolean new_data_set;
+volatile boolean is_data_bit;
+volatile int bit_read_count;
 int bit_delay;
 
 int data_bits = 69;
 
 //Timers
 unsigned long current_time_us;
-unsigned long last_time_us;
+volatile unsigned long last_time_us;
 unsigned long delay_reset_us;
 unsigned long wheel_time_now;
 unsigned long wheel_time_last;
