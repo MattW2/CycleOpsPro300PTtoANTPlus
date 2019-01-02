@@ -68,6 +68,11 @@ unsigned long delay_reset_us;
 unsigned long wheel_time_now;
 unsigned long wheel_time_last;
 
+//Timers and switch for finding error bits
+volatile unsigned long last_rising_edge;
+volatile unsigned long last_falling_edge;
+volatile boolean error_bit_found;
+
 //array to store data
 boolean data_input[70];
 int data_start_test_bits = 38;
@@ -130,6 +135,10 @@ void setup()
 	ANT_icad = 0;
 	ANT_INST_power = 0;
 	CycleOps_CheckSum = 0;
+	
+	last_rising_edge = 0;
+	last_falling_edge = 0;
+	error_bit_found = 0;
 
 	digitalWrite(CLOCK_OUT, LOW);
 
@@ -197,7 +206,7 @@ void setup()
 	basicpower();
 
 	//interrupt for wheel data from CycleOps
-	attachInterrupt(digitalPinToInterrupt(WHEEL_DATA), find_start_of_wheel_data, RISING);
+	attachInterrupt(digitalPinToInterrupt(WHEEL_DATA), find_start_of_wheel_data, CHANGE);
 
 	current_time_us = micros();
 	last_time_us = current_time_us;
@@ -239,11 +248,15 @@ void loop()
 			bit_read_count++;
 		}
 	}
+	
+	if (error_bit_found) {
+		Serial.println(F("ERROR BIT FOUND"));
+	}
 
 	if (data_position == data_bits) { //time to spit out the data and reset
 		start_reading = 0;
 		//test if data is valid
-		if (memcmp(data_input,VALID_START_DATA,19) == 0) {			
+		if (memcmp(data_input,VALID_START_DATA,19) == 0 && !error_bit_found) {			
 			read_torque();
 			read_speed();
 			read_checkSum();
@@ -251,16 +264,19 @@ void loop()
 			data_position = 0;
 			delay_reset_us = current_time_us;
 			reset_ready = 1;
+			error_bit_found = 0;
 		} else { //data is not valid, clear buffer
 			data_position = 0;
 			delay_reset_us = current_time_us;
 			reset_ready = 1;
+			error_bit_found = 0;
 		}
 	}
-
+	
 	if (reset_ready && ((current_time_us - delay_reset_us) > 100000)) {
 		reset_ready = 0;
 		bit_read_count = 0;
+		error_bit_found = 0;
 	}
 
 	if (recalc == 1)
@@ -498,6 +514,7 @@ void read_wheel_data() {
 }
 
 void find_start_of_wheel_data() {
+	//looking for the start of a data packet
 	if (data_position ==  0 && reset_ready == 0) {
 		//check if it is an error bit
 		delayMicroseconds(700);
@@ -507,9 +524,26 @@ void find_start_of_wheel_data() {
 			is_data_bit = 1;
 			bit_read_count = 0;      
 		}
+	} else if(start_reading == 1) { //we are in the process of reading in a data packet
+		if(digitalRead(WHEEL_DATA)) //we just found a rising edge
+			do_rising_mid_packet();
+		else { 						//must be a falling edge
+			do_falling_mid_packet();
+		}	
 	}
 	//Serial.print("found start = ");
 	//Serial.println(current_time_us);
+}
+
+void do_rising_mid_packet() {
+	last_rising_edge = millis();
+}
+
+void do_falling_mid_packet() {
+	last_falling_edge = millis();
+	if ((last_falling_edge - last_rising_edge) < 500) {
+		error_bit_found = 1;
+	}		
 }
 
 void read_torque() {
