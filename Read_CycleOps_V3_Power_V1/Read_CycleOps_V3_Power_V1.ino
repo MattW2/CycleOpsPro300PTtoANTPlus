@@ -536,11 +536,11 @@ void find_start_of_wheel_data() {
 }
 
 void do_rising_mid_packet() {
-	last_rising_edge = millis();
+	last_rising_edge = micros();
 }
 
 void do_falling_mid_packet() {
-	last_falling_edge = millis();
+	last_falling_edge = micros();
 	if ((last_falling_edge - last_rising_edge) < 500) {
 		error_bit_found = 1;
 	}		
