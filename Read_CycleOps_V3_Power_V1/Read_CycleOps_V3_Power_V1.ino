@@ -48,9 +48,6 @@ SSD1306AsciiAvrI2c display;
 // ****************************************************************************
 // *************************  GLOBALS for Read CycelOps************************
 // ****************************************************************************
-//static const int WHEEL_DATA = 7;
-//static const int CLOCK_OUT = 16;
-//static const int ERROR_OUT = 10;
 static const double WHEEL_SLOPE = 527.2213800;
 static const double WHEEL_OFFSET = -3181.8199961;
 static const double GEAR_RATIO = 0.269230769;
@@ -82,7 +79,6 @@ boolean data_being_read;
 
 //array to store data
 boolean data_input[70];
-int data_start_test_bits = 38;
 int data_position;
 int torque;
 int torque_in_lbs;
