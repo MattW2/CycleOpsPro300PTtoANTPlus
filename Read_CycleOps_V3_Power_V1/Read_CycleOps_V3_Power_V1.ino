@@ -35,6 +35,10 @@
 //Conversion Constants
 #define WHEEL_SPEED_CONVERSION 6283185.30718
 #define TORQUE_INLBS_TO_NM 0.112984829
+#define WHEEL_CIRCUMFERENCE_MM 2097
+// #define BIKE_WHEEL_ROTATIONS_PER_MS_PER_RPM 0.00005493756314
+#define BIKE_WHEEL_ROTATIONS_PER_SEC_PER_RPM 0.05493756313961
+#define MPH_PER_RPM 0.257599163
 
 #if defined(USE_OLCD)
 //OLED Display
@@ -43,6 +47,8 @@
 #define I2C_ADDRESS 0x3C
 SSD1306AsciiAvrI2c display; 
 #endif
+
+#define MAX_DATA_PAGE_INDEX 5
 
 
 // ****************************************************************************
@@ -68,8 +74,8 @@ int data_bits = 50;
 unsigned long current_time_us;
 volatile unsigned long last_time_us;
 unsigned long delay_reset_us;
-unsigned long wheel_time_now;
-unsigned long wheel_time_last;
+unsigned long wheel_time_now_ms;
+unsigned long wheel_time_last_ms;
 
 //Timers and switch for finding error bits
 volatile unsigned long last_rising_edge;
@@ -97,9 +103,9 @@ Bounce torque_zero_input = Bounce();
 const int Mag_pickup = 3; // the number of the pushbutton pin
 //int pin = 13;
 volatile int state = LOW;
-unsigned long time1;
-unsigned long time2;
-unsigned long period;
+//unsigned long time1;
+//unsigned long time2;
+//unsigned long period;
 
 double omega;
 double torque_kgm;
@@ -108,9 +114,16 @@ double torque_Nm;
 byte ANT_event = 0;
 uint16_t ANT_INST_power = 0;
 uint16_t ANT_power = 0;
-uint8_t ANT_icada = 0; // Instant Cadence
 uint8_t ANT_icad = 0; // Corrected Cadence
 double powerconst;
+
+// ****************************************************************************
+// *************************  GLOBALS for Cadance Out**************************
+// ****************************************************************************
+uint8_t ANT_wheel_ticks = 0;
+uint16_t ANT_wheel_period = 0;
+uint16_t ANT_accumulated_torque = 0;
+double Bike_Speed_MPH = 0;
 
 boolean recalc = 0;
 
@@ -119,6 +132,7 @@ long debounceDelay = 30; // the debounce time; increase if the output flickers
 int buttonState; // the current reading from the input pin
 int lastButtonState = LOW; // the previous reading from the input pin
 boolean sent = 0;
+int data_page_index = 0;
 
 void setup()
 {
@@ -127,8 +141,8 @@ void setup()
 	start_reading = 0;
 	new_data_set = 0;
 	reset_ready = 0;
-	wheel_time_now = 0;
-	wheel_time_last = 0;
+	//wheel_time_now = 0;
+	//wheel_time_last = 0;
 	bit_read_count = 0;
 
 	torque = 0;
@@ -136,11 +150,17 @@ void setup()
 	ANT_icad = 0;
 	ANT_INST_power = 0;
 	CycleOps_CheckSum = 0;
+
+  ANT_wheel_ticks = 0;
+  ANT_wheel_period = 0;
+  ANT_accumulated_torque = 0;
 	
 	last_rising_edge = 0;
 	last_falling_edge = 0;
 	error_bit_found = 0;
 	data_being_read = 0;
+
+  data_page_index = 0;
 
 	digitalWrite(CLOCK_OUT, LOW);
 	digitalWrite(ERROR_OUT, LOW);
@@ -207,18 +227,23 @@ void setup()
 	initiate();
 	delay(20);
 
-	basicpower();
+	ant_send_basicpower();
 
 	//interrupt for wheel data from CycleOps
 	attachInterrupt(digitalPinToInterrupt(WHEEL_DATA), find_start_of_wheel_data, CHANGE);
 
 	current_time_us = micros();
 	last_time_us = current_time_us;
+  
+  wheel_time_now_ms = millis();
+  wheel_time_last_ms = wheel_time_now_ms;
 }
 
 void loop()
 {
 	int i;
+  unsigned long wheel_time_delta_ms;
+  
 	current_time_us = micros();
 
 	if (new_data_set) {
@@ -286,12 +311,24 @@ void loop()
 
 	if (recalc == 1)
 	{
-		ANT_event++;
 		ANT_icad = uint8_t(omega * 9.549296586 * GEAR_RATIO); // Cadence (RPM)
 
-		ANT_INST_power = uint16_t(torque_Nm * omega); // Instant power calculated
-		ANT_power += ANT_INST_power; // Incremental power calcualted
-		
+		ANT_INST_power = uint16_t(torque_Nm * omega); // Instant power calculation
+		ANT_power += ANT_INST_power; // Incremental power calculation
+
+    //values for wheel speed Data Page (0x11)
+    wheel_time_now_ms = millis();
+    wheel_time_delta_ms = wheel_time_now_ms - wheel_time_last_ms;
+    wheel_time_last_ms = wheel_time_now_ms;
+    
+    ANT_wheel_ticks += uint8_t((wheel_time_delta_ms * ANT_icad * BIKE_WHEEL_ROTATIONS_PER_SEC_PER_RPM) / 1000);
+    if (ANT_icad > 0)
+    {
+      ANT_wheel_period += uint16_t(1/(ANT_icad * BIKE_WHEEL_ROTATIONS_PER_SEC_PER_RPM ) * 2048);
+    }
+    ANT_accumulated_torque += uint16_t(torque_Nm * 32); // Accumulated torque calculation
+    Bike_Speed_MPH = ANT_icad * MPH_PER_RPM;
+    
 	//write data to serial out
 		for (i = 0; i <= data_bits; i++) {
 			Serial.print(data_input[i]);
@@ -306,9 +343,28 @@ void loop()
 		Serial.print(ANT_INST_power, 1);
 		Serial.print(F(" "));
 		//Serial.print(CycleOps_CheckSum, DEC);
+    Serial.print(ANT_wheel_ticks, 1);
+    Serial.print(F(" "));
+    Serial.print(ANT_wheel_period, 1);
+    Serial.print(F(" "));
+    Serial.print(ANT_accumulated_torque, 1);
 		Serial.println(F(""));
 
-		basicpower(); // Main ANT tranmission of Basic Power Data and RPM
+    if (data_page_index == 0)
+    {
+      ANT_event++;
+      ant_send_basicpower(); // Main ANT tranmission of Basic Power Data and RPM
+    }
+    if (data_page_index >= 1)
+    {
+      ANT_event++;
+      ant_send_wheel_torque(); //Main Ant transmission of wheel speed (for bike speed)
+    }
+    data_page_index++;
+    if (data_page_index >= MAX_DATA_PAGE_INDEX)
+    {
+      data_page_index = 0;
+    }
 		Serial1.flush();
 
 #if defined(USE_OLCD)
@@ -483,7 +539,7 @@ void initiate()
 	delay(100);
 }
 
-void basicpower()
+void ant_send_basicpower()
 {
 	uint8_t buf[13];
 	buf[0] = MESG_TX_SYNC; // SYNC Byte 0xA4
@@ -500,6 +556,25 @@ void basicpower()
 	buf[11] = byte((ANT_INST_power >> 8) & 0xFF); // Instant power MSB, Byte 7
 	buf[12] = checkSum(buf, 12);
 	ANTsend(buf, 13);
+}
+
+void ant_send_wheel_torque()
+{
+  uint8_t buf[13];
+  buf[0] = MESG_TX_SYNC; // SYNC Byte 0xA4
+  buf[1] = 0x09; // LENGTH Byte
+  buf[2] = MESG_BROADCAST_DATA_ID; // 0x4E
+  buf[3] = 0x00; // Channel number
+  buf[4] = 0x11; // 0x11 – sensor measures torque at wheel, Byte 0
+  buf[5] = ANT_event; // Event counter increments with each information update, Byte 1
+  buf[6] = byte(ANT_wheel_ticks); // Wheel tick count increments with each wheel revolution, Byte 2
+  buf[7] = ANT_icad; // Instant Cadence, RPM, Byte 3
+  buf[8] = byte(ANT_wheel_period & 0xFF); // Accumulated wheel period LSB, Byte 4
+  buf[9] = byte((ANT_wheel_period >> 8) & 0xFF); // Accumulated wheel period  MSB, Byte 5
+  buf[10] = byte(ANT_accumulated_torque & 0xFF); // Accumulated torque LSB, Byte 6
+  buf[11] = byte((ANT_accumulated_torque >> 8) & 0xFF); // Accumulated torque MSB, Byte 7
+  buf[12] = checkSum(buf, 12);
+  ANTsend(buf, 13);
 }
 
 //functions for getting data from cycleops
@@ -662,5 +737,10 @@ void update_OLED() {
 	display.print(F("RPM:"));
 	display.clearToEOL();
 	display.print(ANT_icad, 1);
+  display.set1X();
+  display.setCursor(0, 6); // begin text at this location, X,Y
+  display.print(F("S:"));
+  display.clearToEOL();
+  display.print(Bike_Speed_MPH, 1);
 }
 #endif
